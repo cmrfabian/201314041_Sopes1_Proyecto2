@@ -1067,10 +1067,10 @@ void VentanaSalida(int jug)
             mvprintw(7,15,"   |_|  \\____/ \\____/      \\/  \\/   |_____|_| \\_|");         
         }
         mvprintw(10,36,"DEFENSOR");
-        mvprintw(13,33,"Score:");
-        mvprintw(13,41,"%d",SharedMemory[8]);
-        mvprintw(14,33,"Vidas:");
-        mvprintw(14,41,"%d",SharedMemory[55]);
+        mvprintw(14,33,"Score:");
+        mvprintw(14,41,"%d",SharedMemory[8]);
+        mvprintw(15,33,"Vidas:");
+        mvprintw(15,41,"%d",SharedMemory[55]);
 
     }
     else if(jug == 2)
@@ -1096,7 +1096,7 @@ void VentanaSalida(int jug)
             mvprintw(7,15,"   |_|  \\____/ \\____/      \\/  \\/   |_____|_| \\_|");
 
         }
-        mvprintw(11,36,"INVASOR");
+        mvprintw(10,36,"INVASOR");
         mvprintw(14,33,"Vidas:");
         mvprintw(14,41,"%d",SharedMemory[54]);
     }
