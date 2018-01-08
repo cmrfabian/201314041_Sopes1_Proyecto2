@@ -1,7 +1,7 @@
 all: juego
 
 juego: juego.o
-	gcc -o juego juego.o -lncurses -pthread -Wall
+	gcc -g -o juego juego.o -lncurses -pthread -Wall
 
 juego.o: juego.c
 	gcc -o juego.o -c juego.c -Wall

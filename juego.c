@@ -26,6 +26,7 @@
 #define DEFENSOR_1 " /|\\"
 #define DEFENSOR_2 "/|_|\\"
 
+#define INVASOR_MUERTO "\\x.x/"
 #define INVASOR_COMUN "\\-.-/"
 #define INVASOR_FUERTE1 "(/-1-\\)"
 #define INVASOR_FUERTE2 "(/-2-\\)"
@@ -74,8 +75,8 @@ accion_invasor invasor_obtener_accion(void);
 void redibujar_pantalla(void);
 void defensor_disparar(void);
 void invasor_disparar(int nave);
-void manipulacion_balas_defensor(void);
-void manipulacion_balas_invasor(void);
+int manipulacion_balas_defensor(void);
+int manipulacion_balas_invasor(void);
 
 void manipulacion_invasores(long contador);
 void manipulacion_defensor(accion_defensor action);
@@ -86,11 +87,27 @@ void Dekker_invasor(void);
 void VentanaPrincipal(void);
 void VentanaSeleccion(void);
 void VentanaEspera(int jug);
-
+void VentanaSalida(int jug);
+void Start_SharedMemory(void);
+static void exit_game(void);
 
 int *SharedMemory = NULL;
 
+pthread_t tid; 
+
+static void exit_game(void)
+{
+    endwin();
+    printf("Juego Finalizado\n");
+}
+
 int main(void)
+{
+    Start_SharedMemory();
+    return 0;
+}
+
+void Start_SharedMemory(void )
 {
     key_t llave;
     int shm_id;
@@ -125,6 +142,8 @@ int main(void)
     }
 
     /* Variables compartidas de Dekker v5 */
+    SharedMemory[0] = -1; // Bandera ejecución Dekker;
+
     SharedMemory[1] = 0; // Bandera de procedimiento 1
     SharedMemory[2] = 0; // Bandera de procedimiento 2
     SharedMemory[3] = 0; // Turno en algoritmo de Dekker
@@ -134,11 +153,12 @@ int main(void)
     SharedMemory[7] = 0; // Bandera segundo jugador
     VentanaPrincipal();
         
+    atexit(exit_game);
     //Free shared memory.
     shmdt ((char *)SharedMemory);
     shmctl (shm_id, IPC_RMID, (struct shmid_ds *)NULL);
 
-    return 0;
+    return;
 }
 
 
@@ -150,7 +170,7 @@ void VentanaPrincipal(void)
         fprintf(stderr,"Unexpected error with ncurses.");
         exit(EXIT_FAILURE);
     }
-
+    wclear(mainwin);
     noecho();
     keypad(mainwin, TRUE);
     
@@ -166,14 +186,18 @@ void VentanaPrincipal(void)
         wclear(mainwin);
         VentanaSeleccion();
     }
+    else if( getch() == 113 || getch() == 81)
+    {
+        endwin();
+        return;
+    }
     else
     {
         wclear(mainwin);
         VentanaPrincipal();
     }
-
     endwin();
-    return;
+    return;  
 }
 
 void VentanaSeleccion(void)
@@ -263,7 +287,7 @@ void VentanaEspera(int jug)
             mvprintw(12,28,"El defensor ha iniciado.");
 
             // Iniciar tiempo.
-            pthread_t tid;    
+            // pthread_t tid;    
 	        pthread_create(&tid, NULL, HiloTimer, NULL);
         }           
         Dekker_invasor();
@@ -286,7 +310,7 @@ void VentanaEspera(int jug)
             mvprintw(12,29,"El invasor ha iniciado.");
 
             // Iniciar tiempo.
-            pthread_t tid;    
+            // pthread_t tid;    
 	        pthread_create(&tid, NULL, HiloTimer, NULL);
         }
         Dekker_defensor();
@@ -358,15 +382,30 @@ void Dekker_defensor(void)
             }
         }
         /* Región Critica */
+        action = defensor_obtener_accion();
+        if(action == DEF_SALIR)
+        {
+            break;
+        }
+        manipulacion_defensor(action);       
+        if(manipulacion_balas_defensor() == 1)
+        {
+            SharedMemory[0] = 1;
+            //break;
+        }
+
         SharedMemory[3] = 1;  // Turno del otro proceso
         SharedMemory[1] = 0;  
 
-        action = defensor_obtener_accion();
-        manipulacion_defensor(action);       
-        manipulacion_balas_defensor();
         redibujar_pantalla();
         usleep(50000);
+        if(SharedMemory[0] == 1)
+        {
+            break;
+        }
     }
+    endwin();
+    VentanaSalida(1);
 }
 
 void Dekker_invasor(void)
@@ -389,17 +428,34 @@ void Dekker_invasor(void)
             }
         }
         /* Región Critica */
+        action = invasor_obtener_accion();
+        if(action == INV_SALIR)
+        {
+            break;
+        }
+        manipulacion_comandante(action);
+        manipulacion_invasores(contador);
+        if(manipulacion_balas_invasor() == 1)
+        {
+            SharedMemory[0] = 1;
+            //break;
+        }
+
+
         SharedMemory[3] = 0; // Turno del otro proceso
         SharedMemory[2] = 0; 
 
-        action = invasor_obtener_accion();
-        manipulacion_comandante(action);
-        manipulacion_invasores(contador);
-        manipulacion_balas_invasor();
         redibujar_pantalla();
         contador++;
         usleep(50000);
+
+        if(SharedMemory[0] == 1)
+        {
+            break;
+        }
     }
+    endwin();
+    VentanaSalida(2);
 }
 
 void game_reset(void)
@@ -408,6 +464,11 @@ void game_reset(void)
 
     SharedMemory[4] = 0; // 0 Segundos
     SharedMemory[5] = 0; // 0 Minutos
+
+    SharedMemory[8] = 0; // Punteo Defensor
+
+    SharedMemory[54] = 5; // Vidas invasor
+    SharedMemory[55] = 5; // Vidas defensor
     
     SharedMemory[50] = PANTALLA_JUEGO_ANCHO / 2; // Posición x inicial de comandante invasor.
     SharedMemory[9] = PANTALLA_JUEGO_ANCHO / 2; // Posición x inicial de defensor.
@@ -603,80 +664,111 @@ void manipulacion_invasores(long contador)
     return;
 }
 
-void manipulacion_balas_defensor(void)
+int manipulacion_balas_defensor(void)
 {
+    int x, y ;
     for (int i = 0; i < 10; i++) {
         if(SharedMemory[10 + i] >= 0)
         {
             SharedMemory[10 + i]--; // Pos y
+
+
+            /* Validación colisiones con invasores */
+            for (int j = 0; j < INVASORES; j++) 
+            {
+                if (SharedMemory[56 + j] == 1) 
+                {
+                    y = SharedMemory[51] + ((j / 5) * 2);
+                    x = SharedMemory[52] + ((j % 5) * 10);
+
+
+                    /* Colisión contra invasores fuertes */
+                    if(j == 0 || j == 6 || j == 13 || j == 19) // Posiciones de naves fuertes.
+                    {
+                        if (SharedMemory[10 + i] == y) 
+                        {
+                            if ((SharedMemory[20 + i] >= x - 1) && (SharedMemory[20 + i] <= x + 5)) 
+                            {
+                                SharedMemory[56 + j] = 0;
+                                SharedMemory[10 + i] = -1;
+                                SharedMemory[8] += 15;
+                                if(SharedMemory[8] >= 100)
+                                {
+                                    return 1;
+                                }
+                            }
+                        }
+                    }
+                    /* Colisión contra naves normales */
+                    else
+                    {
+                        if (SharedMemory[10 + i] == y) 
+                        {
+                            if ((SharedMemory[20 + i] >= x) && (SharedMemory[20 + i] <= x + 4)) 
+                            {
+                                SharedMemory[56 + j] = 0;
+                                SharedMemory[10 + i] = -1;
+                                SharedMemory[8] += 10;
+                                if(SharedMemory[8] >= 100)
+                                {
+                                    return 1;
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+
+            /* Validar colisiones con defensor. */
+            if(SharedMemory[10 + i] == 0)
+            {
+                if((SharedMemory[20 + i] >= SharedMemory[50]- 2) && SharedMemory[20 + i] <= SharedMemory[50] + 2)
+                {
+                    SharedMemory[54]--;
+                    if(SharedMemory[54] == 0)
+                    {
+                        return 1;
+                        // Fin del juego.
+                    }
+                }
+            } 
         }      
     }
-    return;
+    return 0;
 }
 
-void manipulacion_balas_invasor(void)
+int manipulacion_balas_invasor(void)
 {
     for (int i = 0; i < 10; i++) {
         if(SharedMemory[30 + i] <= PANTALLA_JUEGO_ALTURA)
         {
             SharedMemory[30 + i]++; // Pos y
+
+            /* Validación colisiones con defensor. */
+            if(SharedMemory[30 + i] == PANTALLA_JUEGO_ALTURA)
+            {
+                if((SharedMemory[40 + i] >= SharedMemory[9]- 2) && SharedMemory[40 + i] <= SharedMemory[9] + 2)
+                {
+                    SharedMemory[55]--;
+                    if(SharedMemory[55] == 0)
+                    {
+                        return 1;
+                        // Fin del juego.
+                    }
+                }
+            } 
         }      
     }
-    return;
+    return 0;
 }
 
 void redibujar_pantalla(void)
 {
   
     int i,x,y, maxy, maxx;
-    int aux = 0;
-    int inv = 1;
-
     erase();
 
-    /* Pintar invasores */
-    for (i = 0; i < INVASORES; i++) 
-    {
-        if (SharedMemory[56 + i] == 1) 
-        {
-            y = SharedMemory[51] + ((i / 5) * 2);
-            x = SharedMemory[52] + ((i % 5) * 10);
-            if(aux == 0 || aux == 6 || aux == 13 || aux == 19)
-            {
-                if(inv == 1)
-                {
-                mvaddstr(y, x-1, INVASOR_FUERTE1); 
-                }
-                else if (inv == 2)
-                {
-                mvaddstr(y, x-1, INVASOR_FUERTE2); 
-                }
-                else if (inv == 3)
-                {
-                mvaddstr(y, x-1, INVASOR_FUERTE3);
-                }
-                else if (inv == 4)
-                {
-                mvaddstr(y, x-1, INVASOR_FUERTE4);
-                }                
-                inv++;
-            }
-            else
-            {
-                mvaddstr(y, x, INVASOR_COMUN);
-            }
-        }
-        aux++;
-    }
-
-    /* Pintar DEFENSOR. */
-    mvaddstr(PANTALLA_JUEGO_ALTURA - 2, SharedMemory[9] - 2, DEFENSOR_1);
-    mvaddstr(PANTALLA_JUEGO_ALTURA - 1, SharedMemory[9] - 2, DEFENSOR_2);
-
-    /* Pintar COMANDANTE INVASOR .*/
-    mvaddstr(0, SharedMemory[50] - 2, COMANDANTE_1);
-    mvaddstr(1, SharedMemory[50] - 2, COMANDANTE_2);
-  
     /* Movimiento de balas */
     for (i = 0; i < 10; i++) {
         if(SharedMemory[10 + i] >= 0)
@@ -690,9 +782,54 @@ void redibujar_pantalla(void)
         }       
     }
 
+
+    /* Pintar invasores */
+    for (i = 0; i < INVASORES; i++) 
+    {
+        if (SharedMemory[56 + i] == 1) 
+        {
+            y = SharedMemory[51] + ((i / 5) * 2);
+            x = SharedMemory[52] + ((i % 5) * 10);
+            if(i == 0 || i == 6 || i == 13 || i == 19)
+            {
+                if(i == 0)
+                {
+                mvaddstr(y, x-1, INVASOR_FUERTE1); 
+                }
+                else if (i == 6)
+                {
+                mvaddstr(y, x-1, INVASOR_FUERTE2); 
+                }
+                else if (i == 13)
+                {
+                mvaddstr(y, x-1, INVASOR_FUERTE3);
+                }
+                else if (i == 19)
+                {
+                mvaddstr(y, x-1, INVASOR_FUERTE4);
+                }                
+            }
+            else
+            {
+                mvaddstr(y, x, INVASOR_COMUN);
+            }
+        }
+    }
+
+    /* Pintar DEFENSOR. */
+    mvaddstr(PANTALLA_JUEGO_ALTURA - 2, SharedMemory[9] - 2, DEFENSOR_1);
+    mvaddstr(PANTALLA_JUEGO_ALTURA - 1, SharedMemory[9] - 2, DEFENSOR_2);
+
+    /* Pintar COMANDANTE INVASOR .*/
+    mvaddstr(0, SharedMemory[50] - 2, COMANDANTE_1);
+    mvaddstr(1, SharedMemory[50] - 2, COMANDANTE_2);
+  
+
+
+
     mvprintw(1,71,"INVASOR");
     mvprintw(2,72,"Vidas:");
-    mvprintw(3,72,"%d",5);
+    mvprintw(3,72,"%d",SharedMemory[54]);
 
     /* Tiempo */
     mvprintw(10,72,"Tiempo:");
@@ -716,9 +853,9 @@ void redibujar_pantalla(void)
 
     mvprintw(17,71,"DEFENSOR");
     mvprintw(18,72,"Score:");
-    mvprintw(19,72,"%d",1000);
+    mvprintw(19,72,"%d",SharedMemory[8]);
     mvprintw(21,72,"Vidas:");
-    mvprintw(22,72,"%d",5);
+    mvprintw(22,72,"%d",SharedMemory[55]);
 
     /* Pintar Bordes */
     getmaxyx(stdscr, maxy, maxx);
@@ -871,6 +1008,108 @@ void invasor_disparar(int nave)
     {
         return; //Solo se permiten 10 balas en el campo
     }
+}
+
+
+void VentanaSalida(int jug)
+{
+    pthread_cancel(tid);
+    WINDOW * mainwin;
+    if ((mainwin = initscr())==NULL)
+    {
+        fprintf(stderr,"Unexpected error with ncurses.");
+        exit(EXIT_FAILURE);
+    }
+    wclear(mainwin);
+    noecho();
+    keypad(mainwin, TRUE);
+    timeout(-1);
+    refresh();
+
+    mvprintw(13,33,"Tiempo ");
+    if(SharedMemory[5] <= 9)  
+    {
+        mvprintw(13,41,"0%d:", SharedMemory[5]);
+    }
+    else
+    {
+        mvprintw(13,41,"%d:", SharedMemory[5]);
+    }   
+
+    if(SharedMemory[4] <= 9)
+    {
+        mvprintw(13,44,"0%d", SharedMemory[4]);
+    }
+    else
+    {
+        mvprintw(13,44,"%d", SharedMemory[4]);
+    }
+
+    if(jug == 1)
+    {
+        if(SharedMemory[55] <= 0)
+        {
+            mvprintw(2,9,"  _____          __  __ ______    ______      ________ _____ "); 
+            mvprintw(3,9," / ____|   /\\   |  \\/  |  ____|  / __ \\ \\    / /  ____|  __ \\ ");
+            mvprintw(4,9,"| |  __   /  \\  | \\  / | |__    | |  | \\ \\  / /| |__  | |__) |");
+            mvprintw(5,9,"| | |_ | / /\\ \\ | |\\/| |  __|   | |  | |\\ \\/ / |  __| |  _  / ");
+            mvprintw(6,9,"| |__| |/ ____ \\| |  | | |____  | |__| | \\  /  | |____| | \\ \\ ");
+            mvprintw(7,9," \\_____/_/    \\_\\_|  |_|______|  \\____/   \\/   |______|_|  \\_\\");
+                                                                            
+        }
+        else
+        {         
+            mvprintw(2,15,"__     ______  _    _  __          _______ _   _ ");
+            mvprintw(3,15,"\\ \\   / / __ \\| |  | | \\ \\        / /_   _| \\ | |");
+            mvprintw(4,15," \\ \\_/ / |  | | |  | |  \\ \\  /\\  / /  | | |  \\| |");
+            mvprintw(5,15,"  \\   /| |  | | |  | |   \\ \\/  \\/ /   | | | . ` |");
+            mvprintw(6,15,"   | | | |__| | |__| |    \\  /\\  /   _| |_| |\\  |");
+            mvprintw(7,15,"   |_|  \\____/ \\____/      \\/  \\/   |_____|_| \\_|");         
+        }
+        mvprintw(10,36,"DEFENSOR");
+        mvprintw(13,33,"Score:");
+        mvprintw(13,41,"%d",SharedMemory[8]);
+        mvprintw(14,33,"Vidas:");
+        mvprintw(14,41,"%d",SharedMemory[55]);
+
+    }
+    else if(jug == 2)
+    {        
+        if(SharedMemory[54] <= 0 || SharedMemory[8] >= 100)
+        {   
+            mvprintw(2,9,"  _____          __  __ ______    ______      ________ _____ "); 
+            mvprintw(3,9," / ____|   /\\   |  \\/  |  ____|  / __ \\ \\    / /  ____|  __ \\ ");
+            mvprintw(4,9,"| |  __   /  \\  | \\  / | |__    | |  | \\ \\  / /| |__  | |__) |");
+            mvprintw(5,9,"| | |_ | / /\\ \\ | |\\/| |  __|   | |  | |\\ \\/ / |  __| |  _  / ");
+            mvprintw(6,9,"| |__| |/ ____ \\| |  | | |____  | |__| | \\  /  | |____| | \\ \\ ");
+            mvprintw(7,9," \\_____/_/    \\_\\_|  |_|______|  \\____/   \\/   |______|_|  \\_\\");
+
+        }
+        else
+        {
+
+            mvprintw(2,15,"__     ______  _    _  __          _______ _   _ ");
+            mvprintw(3,15,"\\ \\   / / __ \\| |  | | \\ \\        / /_   _| \\ | |");
+            mvprintw(4,15," \\ \\_/ / |  | | |  | |  \\ \\  /\\  / /  | | |  \\| |");
+            mvprintw(5,15,"  \\   /| |  | | |  | |   \\ \\/  \\/ /   | | | . ` |");
+            mvprintw(6,15,"   | | | |__| | |__| |    \\  /\\  /   _| |_| |\\  |");
+            mvprintw(7,15,"   |_|  \\____/ \\____/      \\/  \\/   |_____|_| \\_|");
+
+        }
+        mvprintw(11,36,"INVASOR");
+        mvprintw(14,33,"Vidas:");
+        mvprintw(14,41,"%d",SharedMemory[54]);
+    }
+   
+    if( getch() == 10)
+    {
+        Start_SharedMemory();
+    }
+    else
+    {
+        VentanaSalida(jug);
+    }
+    endwin();
 }
 
 
